@@ -1,0 +1,9 @@
+solver,folder,avg_time,avg_mem,min_mem,max_mem,inconclusive,failed
+dp,uf20-91,0.010731,0.00,0.00,0.00,0,0
+dpll,uf20-91,0.010626,0.00,0.00,0.00,0,0
+cdcl-first,uf20-91,0.010607,0.00,0.00,0.00,0,0
+cdcl-random,uf20-91,0.010619,0.00,0.00,0.00,0,0
+cdcl-jeroslow,uf20-91,0.010616,0.00,0.00,0.00,0,0
+cdcl-vsids,uf20-91,0.010602,0.00,0.00,0.00,0,0
+cdcl-berkmin,uf20-91,0.010608,0.00,0.00,0.00,0,0
+cdcl-cls_size,uf20-91,0.010595,0.00,0.00,0.00,0,0
