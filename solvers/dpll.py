@@ -1,49 +1,72 @@
 class DpllSolver:
     def __init__(self, cnf):
-        self.cnf = [list(c) for c in cnf]
+        self.cnf = [list(clause) for clause in cnf]
+        self.assignment = {}
+        self.branching_decisions = 0  # Counter for branching decisions
 
     def simplify(self, cnf, lit):
         new_cnf = []
+        neg_lit = -lit
         for clause in cnf:
             if lit in clause:
-                # clause satisfied → drop it
                 continue
-            if -lit in clause:
-                reduced = [x for x in clause if x != -lit]
-                new_cnf.append(reduced)
-            else:
-                new_cnf.append(list(clause))
+            new_clause = [x for x in clause if x != neg_lit]
+            if not new_clause:
+                return None
+            new_cnf.append(new_clause)
         return new_cnf
 
-    def _dpll(self, cnf, assignment):
-        for clause in cnf:
-            if len(clause) == 0:
+    def _dpll(self, cnf):
+        unit_clauses = [clause[0] for clause in cnf if len(clause) == 1]
+        while unit_clauses:
+            unit = unit_clauses.pop()
+            cnf = self.simplify(cnf, unit)
+            if cnf is None:
                 return False
+            self.assignment[abs(unit)] = unit > 0
+            unit_clauses.extend(clause[0] for clause in cnf if len(clause) == 1)
+
+        literals = set()
+        pure_literals = set()
+        for clause in cnf:
+            for lit in clause:
+                if -lit not in literals:
+                    pure_literals.add(lit)
+                literals.add(lit)
+                if -lit in pure_literals:
+                    pure_literals.remove(-lit)
+
+        for lit in pure_literals:
+            cnf = self.simplify(cnf, lit)
+            self.assignment[abs(lit)] = lit > 0
 
         if not cnf:
             return True
+        if any(not clause for clause in cnf):
+            return False
 
+        var_counts = {}
         for clause in cnf:
-            if len(clause) == 1:
-                unit = clause[0]
-                return self._dpll(self.simplify(cnf, unit),
-                                  {**assignment, abs(unit): unit > 0})
+            for lit in clause:
+                var = abs(lit)
+                var_counts[var] = var_counts.get(var, 0) + 1
 
-        all_literals = {lit for clause in cnf for lit in clause}
-        for lit in list(all_literals):
-            if -lit not in all_literals:
-                return self._dpll(self.simplify(cnf, lit),
-                                  {**assignment, abs(lit): lit > 0})
+        var = max(var_counts.keys(), key=lambda k: var_counts[k])
 
-        first_clause = cnf[0]
-        var = abs(first_clause[0])
+        # Increment branching decisions counter
+        self.branching_decisions += 1
 
-        if self._dpll(self.simplify(cnf, var),
-                      {**assignment, var: True}):
-            return True
-        return self._dpll(self.simplify(cnf, -var),
-                          {**assignment, var: False})
+        for value in [True, False]:
+            new_cnf = self.simplify(cnf, var if value else -var)
+            if new_cnf is not None:
+                self.assignment[var] = value
+                if self._dpll(new_cnf):
+                    return True
+                del self.assignment[var]
+
+        return False
 
     def solve(self):
-        return self._dpll(self.cnf, {})
-
+        self.assignment = {}
+        result = self._dpll(self.cnf)
+        return result, self.branching_decisions  # Return branching decisions along with the result

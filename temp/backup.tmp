@@ -1,0 +1,346 @@
+{
+  "dpll": {
+    "None": {
+      "uf20-91": {
+        "mem_min": 20.0,
+        "mem_max": 104.0,
+        "inconclusive": 0,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 250,
+        "csv_ready_data": [
+          [
+            "dpll",
+            "uf20-91",
+            "0.001055",
+            "0.000366",
+            "0.002415",
+            "22.64",
+            "20.00",
+            "104.00",
+            0,
+            0,
+            "6.68"
+          ]
+        ],
+        "consecutive_timeouts": 0,
+        "decisions": 1670
+      },
+      "uf100-430": {
+        "mem_min": 0.0,
+        "mem_max": 1108.0,
+        "inconclusive": 0,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 250,
+        "csv_ready_data": [
+          [
+            "dpll",
+            "uf100-430",
+            "0.878702",
+            "0.009029",
+            "5.329494",
+            "32.09",
+            "0.00",
+            "1108.00",
+            0,
+            0,
+            "411.80"
+          ]
+        ],
+        "consecutive_timeouts": 0,
+        "decisions": 102949
+      },
+      "uf125-538": {
+        "mem_min": 0.0,
+        "mem_max": 1172.0,
+        "inconclusive": 0,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 100,
+        "csv_ready_data": [
+          [
+            "dpll",
+            "uf125-538",
+            "5.544373",
+            "0.024949",
+            "28.159280",
+            "64.60",
+            "0.00",
+            "1172.00",
+            0,
+            0,
+            "1771.15"
+          ]
+        ],
+        "consecutive_timeouts": 0,
+        "decisions": 177115
+      },
+      "uf150-645": {
+        "mem_min": 0.0,
+        "mem_max": 1380.0,
+        "inconclusive": 0,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 100,
+        "csv_ready_data": [
+          [
+            "dpll",
+            "uf150-645",
+            "21.882091",
+            "0.030735",
+            "123.993580",
+            "338.04",
+            "0.00",
+            "1380.00",
+            0,
+            0,
+            "5202.37"
+          ]
+        ],
+        "consecutive_timeouts": 0,
+        "decisions": 520237
+      },
+      "uf175-753": {
+        "mem_min": 0.0,
+        "mem_max": 2296.0,
+        "inconclusive": 12,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 100,
+        "csv_ready_data": [
+          [
+            "dpll",
+            "uf175-753",
+            "93.785462",
+            "1.104063",
+            "298.294571",
+            "864.24",
+            "0.00",
+            "2296.00",
+            12,
+            0,
+            "15371.78"
+          ]
+        ],
+        "consecutive_timeouts": 0,
+        "decisions": 1537178
+      },
+      "uf200-860": {
+        "times": [],
+        "mems": [],
+        "mem_min": Infinity,
+        "mem_max": -Infinity,
+        "inconclusive": 100,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 100,
+        "csv_ready_data": [],
+        "consecutive_timeouts": 10,
+        "decisions": 0
+      },
+      "uf225-960": {
+        "times": [],
+        "mems": [],
+        "mem_min": Infinity,
+        "mem_max": -Infinity,
+        "inconclusive": 100,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 100,
+        "csv_ready_data": [],
+        "consecutive_timeouts": 10,
+        "decisions": 0
+      },
+      "uf250-1065": {
+        "times": [],
+        "mems": [],
+        "mem_min": Infinity,
+        "mem_max": -Infinity,
+        "inconclusive": 100,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 100,
+        "csv_ready_data": [],
+        "consecutive_timeouts": 10,
+        "decisions": 0
+      },
+      "uf50-218": {
+        "mem_min": 20.0,
+        "mem_max": 108.0,
+        "inconclusive": 0,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 250,
+        "csv_ready_data": [
+          [
+            "dpll",
+            "uf50-218",
+            "0.017433",
+            "0.001882",
+            "0.058902",
+            "22.24",
+            "20.00",
+            "108.00",
+            0,
+            0,
+            "29.93"
+          ]
+        ],
+        "consecutive_timeouts": 0,
+        "decisions": 7483
+      },
+      "uf75-325": {
+        "mem_min": 20.0,
+        "mem_max": 280.0,
+        "inconclusive": 0,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 100,
+        "csv_ready_data": [
+          [
+            "dpll",
+            "uf75-325",
+            "0.153746",
+            "0.006633",
+            "0.518178",
+            "26.35",
+            "20.00",
+            "280.00",
+            0,
+            0,
+            "108.32"
+          ]
+        ],
+        "consecutive_timeouts": 0,
+        "decisions": 10832
+      },
+      "uuf100-430": {
+        "mem_min": 0.0,
+        "mem_max": 344.0,
+        "inconclusive": 0,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 100,
+        "csv_ready_data": [
+          [
+            "dpll",
+            "uuf100-430",
+            "2.287397",
+            "0.863256",
+            "6.614661",
+            "25.84",
+            "0.00",
+            "344.00",
+            0,
+            0,
+            "967.14"
+          ]
+        ],
+        "consecutive_timeouts": 0,
+        "decisions": 96714
+      },
+      "uuf125-538": {
+        "mem_min": 0.0,
+        "mem_max": 324.0,
+        "inconclusive": 0,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 100,
+        "csv_ready_data": [
+          [
+            "dpll",
+            "uuf125-538",
+            "12.883599",
+            "3.200480",
+            "33.997308",
+            "26.35",
+            "0.00",
+            "324.00",
+            0,
+            0,
+            "4065.33"
+          ]
+        ],
+        "consecutive_timeouts": 0,
+        "decisions": 406533
+      },
+      "uuf150-645": {
+        "mem_min": 0.0,
+        "mem_max": 1056.0,
+        "inconclusive": 1,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 100,
+        "csv_ready_data": [
+          [
+            "dpll",
+            "uuf150-645",
+            "60.188036",
+            "13.513419",
+            "190.721077",
+            "61.13",
+            "0.00",
+            "1056.00",
+            1,
+            0,
+            "14199.07"
+          ]
+        ],
+        "consecutive_timeouts": 0,
+        "decisions": 1419907
+      },
+      "uuf175-753": {
+        "mem_min": 0.0,
+        "mem_max": 1732.0,
+        "inconclusive": 87,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 100,
+        "csv_ready_data": [
+          [
+            "dpll",
+            "uuf175-753",
+            "189.597895",
+            "79.412867",
+            "298.903642",
+            "756.39",
+            "0.00",
+            "1732.00",
+            87,
+            0,
+            "4423.41"
+          ]
+        ],
+        "consecutive_timeouts": 10,
+        "decisions": 442341
+      },
+      "uuf200-860": {
+        "times": [],
+        "mems": [],
+        "mem_min": Infinity,
+        "mem_max": -Infinity,
+        "inconclusive": 99,
+        "failed": 0,
+        "completed": true,
+        "completed_tests": 99,
+        "csv_ready_data": [],
+        "consecutive_timeouts": 10,
+        "decisions": 0
+      },
+      "uuf225-960": {
+        "times": [],
+        "mems": [],
+        "mem_min": Infinity,
+        "mem_max": -Infinity,
+        "inconclusive": 3,
+        "failed": 0,
+        "completed": false,
+        "completed_tests": 3,
+        "csv_ready_data": [],
+        "consecutive_timeouts": 3,
+        "decisions": 0
+      }
+    }
+  }
+}

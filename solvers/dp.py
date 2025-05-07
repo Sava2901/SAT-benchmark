@@ -30,7 +30,6 @@ class DpSolver:
         literals = {lit for clause in self.cnf for lit in clause}
         for lit in list(literals):
             if -lit not in literals:
-                # `lit` is pure
                 return self.__class__(self.simplify(self.cnf, lit)).solve()
 
         first_clause = self.cnf[0]
