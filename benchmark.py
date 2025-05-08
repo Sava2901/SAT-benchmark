@@ -22,8 +22,8 @@ SOLVERS = {
     # "resolution": (ResolutionSolver, [None]),
     # "dp":   (DpSolver,   [None]),
     # "dpll": (DpllSolver, [None]),
-    # "cdcl": (CdclSolver, ["first", "random", "jeroslow", "vsids", "berkmin", "cls_size"]),
-    "cdcl": (CdclSolver, ["jeroslow", "vsids"]),
+    "cdcl": (CdclSolver, ["ORDERED", "VSIDS", "MINISAT", "JEROSLOW", "BERKMIN", "RANDOM", "CLS_SIZE"]),
+    # "cdcl": (CdclSolver, ["BERKMIN"]),
 }
 
 BACKUP_PATH = "results/backup.tmp"
