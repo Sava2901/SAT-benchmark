@@ -13,7 +13,7 @@ from utils.memory import MemoryTracker
 from solvers.resolution import ResolutionSolver
 from solvers.dp import DpSolver
 from solvers.dpll import DpllSolver
-from solvers.cdcl import CdclSolver
+from solvers.cdcl.cdcl import CdclSolver
 
 TIMEOUT = 300
 CNF_PATHS = list(Path("benchmarks").rglob("*.cnf"))

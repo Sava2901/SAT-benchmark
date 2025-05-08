@@ -1,7 +1,9 @@
+# import heapq
 import random
-import heapq
 from collections import defaultdict
 from typing import List, Tuple, Optional
+from .LubyGenerator import get_next_luby_number, reset_luby
+from .PriorityQueue import PriorityQueue
 
 class Clause:
     """Represents a clause in the CNF formula"""
@@ -9,7 +11,7 @@ class Clause:
         self.literals = literals
         self.learnt = learnt
         self.activity = 0.0
-        self.lbd = 0  # Literal Block Distance (for clause quality)
+        self.lbd = 0
 
 class Watcher:
     """Represents a watcher for a clause"""
@@ -21,7 +23,6 @@ class CdclSolver:
     """CDCL (Conflict-Driven Clause Learning) SAT solver with multiple branching heuristics"""
 
     def __init__(self, cnf: List[List[int]], strategy: str = "vsids"):
-        # Validate strategy
         valid_strategies = ["first", "random", "vsids", "jeroslow", "berkmin", "cls_size"]
         if strategy not in valid_strategies:
             raise ValueError(f"Strategy must be one of {valid_strategies}")
@@ -32,14 +33,17 @@ class CdclSolver:
         self.learnts: List[int] = []
         self.watches = defaultdict(list)
         self.strategy = strategy
+        
+        # Track whether this is an unsatisfiable formula
+        self.is_unsat = False
 
         # Variable state
-        self.assignment = {}  # Maps variables to their assigned values
-        self.level = {}       # Decision level for each variable
-        self.reason = {}      # Reason (clause) for each propagated variable
-        self.polarity = defaultdict(bool)  # Phase saving
-        self.activity = defaultdict(float)  # Variable activity for VSIDS
-        self.var_heap = []    # Heap for variable selection
+        self.assignment = {}                  # Maps variables to their assigned values
+        self.level = {}                       # Decision level for each variable
+        self.reason = {}                      # Reason (clause) for each propagated variable
+        self.polarity = defaultdict(bool)     # Phase saving
+        self.activity = defaultdict(float)    # Variable activity for VSIDS
+        self.var_heap = None                  # Heap for variable selection
 
         # Jeroslow-Wang score
         self.jw_score = defaultdict(float)
@@ -49,74 +53,85 @@ class CdclSolver:
         self.berkmin_touched = {}
 
         # Search state
-        self.trail = []       # Assignment trail
-        self.trail_lim = []   # Decision level limits in trail
-        self.qhead = 0        # Head of propagation queue
-        self.decisions = 0    # Counter for branching decisions
+        self.trail = []                       # Assignment trail
+        self.trail_lim = []                   # Decision level limits in trail
+        self.qhead = 0                        # Head of propagation queue
+        self.decisions = 0                    # Counter for branching decisions
+        self.restarts = 0                     # Count of restarts
 
         # Parameters
-        self.var_inc = 1.0    # Variable activity increment
-        self.var_decay = 0.95 # Variable activity decay factor
-        self.clause_inc = 1.0 # Clause activity increment
-        self.clause_decay = 0.999 # Clause activity decay factor
+        self.var_inc = 1.0                    # Variable activity increment
+        self.var_decay = 0.95                 # Variable activity decay factor (0.95 -> 0.99 for larger problems)
+        self.clause_inc = 1.0                 # Clause activity increment
+        self.clause_decay = 0.999             # Clause activity decay factor
+        self.restart_threshold = 1024         # Increased from 512 for larger problems
+        self.max_conflicts_before_restart = 100 # Conflicts before triggering a restart
 
-        # Initialize with CNF
         for clause in cnf:
             self.add_clause(list(clause))
-        # Check for empty clause after initialization
         for clause in self.clauses:
             if len(clause.literals) == 0:
                 self.unsat_due_to_empty_clause = True
+                self.is_unsat = True
                 break
         else:
             self.unsat_due_to_empty_clause = False
 
-        # Initialize variable scores
         self._initialize_scores()
+        reset_luby()
 
     def _initialize_scores(self):
         """Initialize variable scores based on the selected strategy"""
-        # Initialize VSIDS activity
         for clause in self.clauses:
             for lit in clause.literals:
                 var = abs(lit)
                 self.activity[var] += 1.0
 
-        # Initialize Jeroslow-Wang scores if needed
         if self.strategy == "jeroslow":
             for clause in self.clauses:
                 for lit in clause.literals:
                     var = abs(lit)
                     self.jw_score[var] += 2 ** -len(clause.literals)
 
-        # Build the variable heap
         self._rebuild_heap()
+
+    def _rebuild_heap(self):
+        """Rebuild the variable priority queue for VSIDS"""
+        num_vars = self._num_vars()
+        if num_vars == 0:
+            self.var_heap = None
+            return
+
+        activity_scores = [0.0]
+        for var in range(1, num_vars + 1):
+            if var not in self.assignment:
+                activity_scores.append(self.activity[var])
+            else:
+                activity_scores.append(0.0)
+
+        self.var_heap = PriorityQueue(activity_scores)
 
     def add_clause(self, literals: List[int], learnt: bool = False) -> int:
         """Add a clause to the solver and return its index"""
         if not literals:
-            return -1  # Empty clause means UNSAT
+            return -1
 
-        # Check for trivial clauses (tautologies)
         seen = set()
         for lit in literals.copy():
             var = abs(lit)
             if lit in seen:
-                literals.remove(lit)  # Remove duplicate literals
+                literals.remove(lit)
                 continue
             if -lit in seen:
-                return -2  # Tautology, ignore clause
+                return -2
             seen.add(lit)
 
-        # Create and add the clause
         clause = Clause(literals, learnt)
         clause_idx = len(self.clauses)
         self.clauses.append(clause)
 
-        # Set up watches for the clause
         self._attach_clause(clause_idx)
 
-        # If it's a learnt clause, add to learnts list
         if learnt:
             self.learnts.append(clause_idx)
 
@@ -127,75 +142,86 @@ class CdclSolver:
         clause = self.clauses[clause_idx]
 
         if len(clause.literals) == 1:
-            # Unit clause - immediately enqueue for propagation
-            # If enqueue fails, it means there's a conflict
             if not self._enqueue(clause.literals[0], clause_idx):
-                # Mark this clause as empty to indicate conflict
                 clause.literals = []
         elif len(clause.literals) > 1:
-            # Watch first two literals
             self.watches[-clause.literals[0]].append(Watcher(clause_idx, clause.literals[1]))
             self.watches[-clause.literals[1]].append(Watcher(clause_idx, clause.literals[0]))
 
     def solve(self) -> Tuple[bool, int]:
         """Solve the SAT problem and return (satisfiability, number of decisions)"""
         # Reset state
-        self.decisions = 0
         if hasattr(self, 'unsat_due_to_empty_clause') and self.unsat_due_to_empty_clause:
-            return False, self.decisions  # UNSAT due to empty clause at initialization
-        # Perform initial unit propagation
+            return False, self.decisions
+            
+        # If we already know this is UNSAT, return False
+        if self.is_unsat:
+            return False, self.decisions
+
+        # Adjust parameters based on problem size
+        num_vars = self._num_vars()
+        if num_vars > 200:
+            # For larger problems, adjust these parameters
+            self.var_decay = 0.99
+            self.restart_threshold = 2048
+            
+        conflict_count = 0
+        self.restarts = 0
+
         conflict = self._propagate()
         if conflict is not None:
-            return False, self.decisions  # UNSAT due to initial propagation
+            self.is_unsat = True
+            return False, self.decisions
 
-        # Add a maximum iteration limit to prevent infinite loops
-        max_iterations = 1000000  # Adjust based on expected problem size
-        iteration_count = 0
+        while True:
+            # Check for restart based on Luby sequence and conflicts
+            if self.decisions > get_next_luby_number() * self.restart_threshold or conflict_count >= self.max_conflicts_before_restart:
+                self._backtrack(0)
+                self.restarts += 1
+                conflict_count = 0
+                continue
 
-        # Main solving loop
-        while iteration_count < max_iterations:
-            iteration_count += 1
-
-            # Propagate all enqueued assignments
             conflict = self._propagate()
 
-            # Check for empty clause after propagation
             for clause in self.clauses:
                 if len(clause.literals) == 0:
-                    return False, self.decisions  # UNSAT due to empty clause after propagation
+                    self.is_unsat = True
+                    return False, self.decisions
 
             if conflict is not None:
                 # Conflict occurred
+                conflict_count += 1
+                
                 if self._decision_level() == 0:
-                    return False, self.decisions  # UNSAT - conflict at decision level 0
+                    self.is_unsat = True
+                    return False, self.decisions
 
-                # Analyze conflict and learn a clause
                 learnt_clause, backtrack_level = self._analyze(conflict)
 
-                # Backtrack to appropriate level
                 self._backtrack(backtrack_level)
 
-                # Add the learnt clause
                 self._add_learnt_clause(learnt_clause)
 
-                # Check for empty clause after learning
                 for clause in self.clauses:
                     if len(clause.literals) == 0:
-                        return False, self.decisions  # UNSAT due to empty clause after learning
+                        self.is_unsat = True
+                        return False, self.decisions
 
-                # Decay variable activities
                 self._decay_activities()
             else:
-                # No conflict
+                conflict_count = 0  # Reset conflict count when no conflict
+                
                 if self._all_variables_assigned():
-                    return True, self.decisions  # SAT - all variables assigned without conflict
+                    # Verify the assignment satisfies all clauses
+                    for clause in self.clauses:
+                        if not self._clause_satisfied(clause):
+                            # Double-check before declaring UNSAT - edge case handling
+                            if not self._double_check_assignment():
+                                self.is_unsat = True
+                                return False, self.decisions
+                    return True, self.decisions
 
-                # Make a new decision
                 self._make_decision()
-
-        # If we've reached the maximum iterations, return unknown (treat as UNSAT)
-        print(f"Warning: Reached maximum iterations ({max_iterations}). Stopping search.")
-        return False, self.decisions
 
     def _propagate(self) -> Optional[int]:
         """Propagate all enqueued assignments and return first conflict clause index if any"""
@@ -204,27 +230,22 @@ class CdclSolver:
             lit = self.trail[self.qhead]
             self.qhead += 1
 
-            # Check all watched clauses for this literal
             i = 0
             while i < len(self.watches[lit]):
                 watcher = self.watches[lit][i]
                 clause_idx = watcher.clause_ref
                 clause = self.clauses[clause_idx]
 
-                # Ensure the blocker is the first watched literal
                 if clause.literals[0] == -lit:
                     clause.literals[0], clause.literals[1] = clause.literals[1], clause.literals[0]
 
-                # If the blocker is already satisfied, skip this clause
                 if self._value_of(clause.literals[0]) is True:
                     i += 1
                     continue
 
-                # Look for a new literal to watch
                 found_watch = False
                 for j in range(2, len(clause.literals)):
                     if self._value_of(clause.literals[j]) is not False:
-                        # Found a new watch
                         clause.literals[1], clause.literals[j] = clause.literals[j], clause.literals[1]
                         self.watches[-clause.literals[1]].append(Watcher(clause_idx, clause.literals[0]))
                         self.watches[lit].pop(i)
@@ -234,25 +255,20 @@ class CdclSolver:
                 if found_watch:
                     continue
 
-                # No new watch found
                 if self._value_of(clause.literals[0]) is False:
-                    # Conflict detected
-                    self.qhead = len(self.trail)  # Stop propagation
+                    self.qhead = len(self.trail)
                     return clause_idx
                 else:
-                    # Unit propagation
                     if not self._enqueue(clause.literals[0], clause_idx):
-                        # Immediate conflict
-                        self.qhead = len(self.trail)  # Stop propagation
+                        self.qhead = len(self.trail)
                         return clause_idx
                     i += 1
 
-        # Check for empty clauses (immediate conflicts)
         for idx, clause in enumerate(self.clauses):
             if len(clause.literals) == 0:
-                return idx  # Empty clause means UNSAT
+                return idx
 
-        return None  # No conflict
+        return None
 
     def _analyze(self, conflict_clause_idx: int) -> Tuple[List[int], int]:
         """Analyze conflict and return a learnt clause and backtrack level"""
@@ -262,35 +278,25 @@ class CdclSolver:
         p = None
         conflict_clause = self.clauses[conflict_clause_idx]
 
-        # Process the current conflict
         current_level = self._decision_level()
         p_reason = conflict_clause.literals
 
-        # 1st UIP (Unique Implication Point) scheme
         while True:
-            # Bump clause activity
             if conflict_clause_idx is not None:
                 self.clauses[conflict_clause_idx].activity += self.clause_inc
 
-            # Iterate through literals in the reason clause
             for lit in p_reason:
                 var = abs(lit)
                 if var not in seen:
                     seen.add(var)
                     if self.level.get(var, 0) == current_level:
                         counter += 1
-                        # Bump variable activity (VSIDS)
                         self.activity[var] += self.var_inc
                     else:
                         learnt.append(lit)
 
-            # Find the next literal to resolve
             while True:
-                # Check if trail is empty to prevent "pop from empty list" error
                 if not self.trail:
-                    # If trail is empty, we can't continue analysis
-                    # This should not happen in a correct CDCL implementation,
-                    # but we'll handle it gracefully
                     return [random.choice(list(seen))], 0
 
                 p = self.trail.pop()
@@ -301,22 +307,19 @@ class CdclSolver:
             if counter == 0:
                 break
 
-            # Get the reason for p
             p_reason_idx = self.reason.get(p)
             if p_reason_idx is None:
-                p_reason = [p]  # Decision variable
+                p_reason = [p]
             else:
                 p_reason = self.clauses[p_reason_idx].literals
 
-        # The first literal is the asserting literal
         learnt = [-p] + learnt
 
-        # Compute backtrack level (second highest level in learnt clause)
         backtrack_level = 0
         if len(learnt) > 1:
             max_level = -1
             second_max_level = -1
-            for lit in learnt[1:]:  # Skip the asserting literal
+            for lit in learnt[1:]:
                 var = abs(lit)
                 level = self.level.get(var, 0)
                 if level > max_level:
@@ -331,16 +334,12 @@ class CdclSolver:
     def _add_learnt_clause(self, learnt: List[int]):
         """Add a learnt clause to the solver"""
         if len(learnt) == 1:
-            # Unit clause - backtrack to level 0 and enqueue
             self._backtrack(0)
             self._enqueue(learnt[0], None)
         else:
-            # Add the clause and watch it
             clause_idx = self.add_clause(learnt, learnt=True)
             if clause_idx >= 0:
-                # Enqueue the asserting literal
                 self._enqueue(learnt[0], clause_idx)
-        # After adding a learnt clause, check for empty clause
         for clause in self.clauses:
             if len(clause.literals) == 0:
                 self.unsat_due_to_empty_clause = True
@@ -351,13 +350,10 @@ class CdclSolver:
     def _backtrack(self, level: int):
         """Backtrack to the given decision level"""
         if level < self._decision_level():
-            # Check if trail is empty or if trail_lim is out of bounds
             if not self.trail or level >= len(self.trail_lim):
-                # Reset everything to be safe
                 self.trail = []
                 self.trail_lim = []
                 self.qhead = 0
-                # After backtracking, check for empty clause
                 for clause in self.clauses:
                     if len(clause.literals) == 0:
                         self.unsat_due_to_empty_clause = True
@@ -365,22 +361,17 @@ class CdclSolver:
                 else:
                     self.unsat_due_to_empty_clause = False
                 return
-            # Undo assignments until we reach the target level
             for i in range(len(self.trail) - 1, self.trail_lim[level] - 1, -1):
                 lit = self.trail[i]
                 var = abs(lit)
-                # Save phase for future decisions
                 self.polarity[var] = (lit > 0)
-                # Remove assignment
                 if var in self.assignment:
                     del self.assignment[var]
                 if var in self.reason:
                     del self.reason[var]
-            # Update trail and decision levels
             self.trail = self.trail[:self.trail_lim[level]]
             self.trail_lim = self.trail_lim[:level]
             self.qhead = len(self.trail)
-            # After backtracking, check for empty clause
             for clause in self.clauses:
                 if len(clause.literals) == 0:
                     self.unsat_due_to_empty_clause = True
@@ -392,19 +383,25 @@ class CdclSolver:
         """Make a new branching decision based on the selected strategy"""
         var = self._pick_branching_variable()
         if var is None:
-            # No unassigned variables left, do not make a decision
             return
-        value = self.polarity[var] if var in self.polarity else True
+            
+        # Enhanced phase selection:
+        # For UF benchmark (which are satisfiable), alternating between positive
+        # and negative polarities can help find solutions faster
+        if self.restarts % 2 == 0:
+            # Use stored polarity
+            value = self.polarity[var] if var in self.polarity else True
+        else:
+            # Try opposite polarity
+            value = not (self.polarity[var] if var in self.polarity else True)
+            
         self._new_decision(var, value)
         self.decisions += 1
 
-        # Choose phase (polarity) based on saved phase
-        lit = var if self.polarity[var] else -var
+        lit = var if value else -var
 
-        # Create a new decision level
         self.trail_lim.append(len(self.trail))
 
-        # Enqueue the decision
         self._enqueue(lit, None)
 
     def _pick_branching_variable(self) -> Optional[int]:
@@ -422,7 +419,6 @@ class CdclSolver:
         elif self.strategy == "cls_size":
             return self._pick_clause_size()
         else:
-            # Default to VSIDS
             return self._pick_vsids()
 
     def _pick_first_unassigned(self) -> Optional[int]:
@@ -442,11 +438,23 @@ class CdclSolver:
         return random.choice(unassigned)
 
     def _pick_vsids(self) -> Optional[int]:
-        """Pick the unassigned variable with the highest VSIDS activity"""
-        unassigned = [var for var in self.activity if var not in self.assignment]
-        if not unassigned:
+        """Pick the unassigned variable with the highest VSIDS activity using PriorityQueue"""
+        if self.var_heap is None or self.var_heap.size == 0:
             return None
-        return max(unassigned, key=lambda v: self.activity[v])
+
+        top_var = self.var_heap.get_top()
+        if top_var == -1:
+            return None
+
+        if top_var not in self.assignment:
+            return top_var
+
+        while top_var != -1:
+            if top_var not in self.assignment:
+                return top_var
+            top_var = self.var_heap.get_top()
+
+        return None
 
     def _pick_jeroslow_wang(self) -> Optional[int]:
         """Pick the unassigned variable with the highest Jeroslow-Wang score"""
@@ -478,29 +486,19 @@ class CdclSolver:
                             break
         return chosen_var
 
-    def _rebuild_heap(self):
-        """Rebuild the variable heap for VSIDS"""
-        self.var_heap = []
-        for var in range(1, self._num_vars() + 1):
-            if var not in self.assignment:
-                # Use negative activity for max-heap behavior
-                heapq.heappush(self.var_heap, (-self.activity[var], var))
-
     def _decay_activities(self):
-        """Decay variable activities"""
+        """Decay variable activities and update priority queue"""
         for var in self.activity:
             self.activity[var] *= self.var_decay
+        self._rebuild_heap()
 
     def _enqueue(self, lit: int, reason: Optional[int]) -> bool:
         """Enqueue an assignment with the given reason"""
         var = abs(lit)
 
-        # Check if already assigned
         if var in self.assignment:
-            # Check for conflict
             return self.assignment[var] == (lit > 0)
 
-        # Make the assignment
         self.assignment[var] = (lit > 0)
         self.level[var] = self._decision_level()
         if reason is not None:
@@ -534,3 +532,29 @@ class CdclSolver:
         self.level[var] = self._decision_level()
         lit = var if value else -var
         self.trail.append(lit)
+
+    def _clause_satisfied(self, clause: Clause) -> bool:
+        """Check if a clause is satisfied by the current assignment"""
+        for lit in clause.literals:
+            if self._value_of(lit) is True:
+                return True
+        return False
+
+    def _double_check_assignment(self) -> bool:
+        """Double-check the current assignment to verify if it's satisfiable.
+        This is a last resort check before declaring a formula unsatisfiable."""
+        for clause in self.clauses:
+            satisfied = False
+            for lit in clause.literals:
+                var = abs(lit)
+                if var in self.assignment:
+                    val = self.assignment[var]
+                    if (lit > 0 and val) or (lit < 0 and not val):
+                        satisfied = True
+                        break
+                else:
+                    # If any variable is unassigned, we can't conclude UNSAT
+                    return True
+            if not satisfied:
+                return False
+        return True
