@@ -15,15 +15,15 @@ from solvers.dp import DpSolver
 from solvers.dpll import DpllSolver
 from solvers.cdcl.cdcl import CdclSolver
 
-TIMEOUT = 300
+TIMEOUT = 150
 CNF_PATHS = list(Path("benchmarks").rglob("*.cnf"))
 
 SOLVERS = {
     # "resolution": (ResolutionSolver, [None]),
     # "dp":   (DpSolver,   [None]),
     # "dpll": (DpllSolver, [None]),
-    "cdcl": (CdclSolver, ["ORDERED", "VSIDS", "MINISAT", "JEROSLOW", "BERKMIN", "RANDOM", "CLS_SIZE"]),
-    # "cdcl": (CdclSolver, ["BERKMIN"]),
+    # "cdcl": (CdclSolver, ["ORDERED", "VSIDS", "MINISAT", "JEROSLOW", "BERKMIN", "RANDOM", "CLS_SIZE"]),
+    "cdcl": (CdclSolver, ["VSIDS", "JEROSLOW", "BERKMIN"])
 }
 
 BACKUP_PATH = "results/backup.tmp"
@@ -106,52 +106,50 @@ def benchmark_all():
                             writer.writerow(row)
                             csvfile.flush()
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:
-            for solver_name, (SolverClass, strategies) in SOLVERS.items():
-                for strat in strategies:
-                    strat_key = str(strat)
-                    label = f"{solver_name}-{strat}" if strat else solver_name
-                    print(f"\n=== {label.upper()} ===")
+        for solver_name, (SolverClass, strategies) in SOLVERS.items():
+            for strat in strategies:
+                strat_key = str(strat)
+                label = f"{solver_name}-{strat}" if strat else solver_name
+                print(f"\n=== {label.upper()} ===")
 
-                    if solver_name not in stats:
-                        stats[solver_name] = {}
-                    if strat_key not in stats[solver_name]:
-                        stats[solver_name][strat_key] = {}
+                if solver_name not in stats:
+                    stats[solver_name] = {}
+                if strat_key not in stats[solver_name]:
+                    stats[solver_name][strat_key] = {}
 
-                    for folder in folders:
-                        if folder not in stats[solver_name][strat_key]:
-                            stats[solver_name][strat_key][folder] = {
-                                "times": [],
-                                "mems": [],
-                                "mem_min": float('inf'),
-                                "mem_max": float('-inf'),
-                                "inconclusive": 0,
-                                "failed": 0,
-                                "completed": False,
-                                "completed_tests": 0,
-                                "csv_ready_data": [],
-                                "consecutive_timeouts": 0,
-                                "decisions": 0
-                            }
+                for folder in folders:
+                    if folder not in stats[solver_name][strat_key]:
+                        stats[solver_name][strat_key][folder] = {
+                            "times": [],
+                            "mems": [],
+                            "mem_min": float('inf'),
+                            "mem_max": float('-inf'),
+                            "inconclusive": 0,
+                            "failed": 0,
+                            "completed": False,
+                            "completed_tests": 0,
+                            "csv_ready_data": [],
+                            "consecutive_timeouts": 0,
+                            "decisions": 0
+                        }
 
-                        folder_stats = stats[solver_name][strat_key][folder]
+                    folder_stats = stats[solver_name][strat_key][folder]
 
-                        if folder_stats["completed"]:
-                            print(f">> Skipping completed: {label} - {folder}")
-                            continue
+                    if folder_stats["completed"]:
+                        print(f">> Skipping completed: {label} - {folder}")
+                        continue
 
-                        test_files = folder_groups[folder]
-                        total_tests = len(test_files)
-                        start_idx = folder_stats["completed_tests"]
+                    test_files = folder_groups[folder]
+                    total_tests = len(test_files)
+                    start_idx = folder_stats["completed_tests"]
 
-                        actual_completed = len(folder_stats["times"]) + folder_stats["inconclusive"] + folder_stats[
-                            "failed"]
-                        if start_idx != actual_completed:
-                            print(
-                                f">> Adjusting start index from {start_idx} to {actual_completed} based on actual data")
-                            start_idx = actual_completed
-                            folder_stats["completed_tests"] = start_idx
+                    actual_completed = len(folder_stats["times"]) + folder_stats["inconclusive"] + folder_stats["failed"]
+                    if start_idx != actual_completed:
+                        print(f">> Adjusting start index from {start_idx} to {actual_completed} based on actual data")
+                        start_idx = actual_completed
+                        folder_stats["completed_tests"] = start_idx
 
+                    with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:
                         for idx in range(start_idx, total_tests):
                             path = test_files[idx]
                             if folder_stats["consecutive_timeouts"] >= 10:
@@ -198,44 +196,44 @@ def benchmark_all():
 
                             if decs:
                                 print(f"{folder:10} {path.name:25} {status:<12} "
-                                      f"Time: {t_elapsed:9.6f}s Mem(avg): {mem_used:9.2f}KB "
+                                      f"Time: {t_elapsed:10.6f}s Mem(avg): {mem_used:9.2f}KB "
                                       f"Decisions: {decs:<5} (Consecutive TOs: {folder_stats['consecutive_timeouts']})")
                             else:
                                 print(f"{folder:10} {path.name:25} {status:12} "
-                                  f"Time: {t_elapsed:9.6f}s Mem(avg): {mem_used:9.2f}KB "
-                                  f"(Consecutive TOs: {folder_stats['consecutive_timeouts']})")
+                                      f"Time: {t_elapsed:10.6f}s Mem(avg): {mem_used:9.2f}KB "
+                                      f"(Consecutive TOs: {folder_stats['consecutive_timeouts']})")
 
                             save_backup()
 
-                        if folder_stats["completed_tests"] == total_tests:
-                            folder_stats["completed"] = True
-                            if folder_stats.get("times"):
-                                avg_time = mean(folder_stats["times"])
-                                avg_mem = mean(folder_stats["mems"])
-                                avg_decs = folder_stats["decisions"] / total_tests if total_tests > 0 else 0
+                    if folder_stats["completed_tests"] == total_tests:
+                        folder_stats["completed"] = True
+                        if folder_stats.get("times"):
+                            avg_time = mean(folder_stats["times"])
+                            avg_mem = mean(folder_stats["mems"])
+                            avg_decs = folder_stats["decisions"] / total_tests if total_tests > 0 else 0
 
-                                csv_row = [
-                                    label,
-                                    folder,
-                                    f"{avg_time:.6f}",
-                                    f"{min(folder_stats['times']):.6f}",
-                                    f"{max(folder_stats['times']):.6f}",
-                                    f"{avg_mem:.2f}",
-                                    f"{folder_stats['mem_min']:.2f}",
-                                    f"{folder_stats['mem_max']:.2f}",
-                                    folder_stats["inconclusive"],
-                                    folder_stats["failed"],
-                                    f"{avg_decs:.2f}"
-                                ]
+                            csv_row = [
+                                label,
+                                folder,
+                                f"{avg_time:.6f}",
+                                f"{min(folder_stats['times']):.6f}",
+                                f"{max(folder_stats['times']):.6f}",
+                                f"{avg_mem:.2f}",
+                                f"{folder_stats['mem_min']:.2f}",
+                                f"{folder_stats['mem_max']:.2f}",
+                                folder_stats["inconclusive"],
+                                folder_stats["failed"],
+                                f"{avg_decs:.2f}"
+                            ]
 
-                                writer.writerow(csv_row)
-                                csvfile.flush()
-                                folder_stats["csv_ready_data"].append(csv_row)
+                            writer.writerow(csv_row)
+                            csvfile.flush()
+                            folder_stats["csv_ready_data"].append(csv_row)
 
-                                del folder_stats["times"]
-                                del folder_stats["mems"]
+                            del folder_stats["times"]
+                            del folder_stats["mems"]
 
-                            save_backup()
+                        save_backup()
 
     return stats
 

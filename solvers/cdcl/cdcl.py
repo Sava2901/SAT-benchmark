@@ -132,7 +132,9 @@ class CdclSolver:
 
         # Process each clause
         for clause in self._cnf:
-            self.add_clause(clause)
+            result = self.add_clause(clause)
+            if result == 0:  # UNSAT detected
+                break
 
         # Initialize priority queue for variable selection
         if self._decider == "VSIDS":
@@ -283,10 +285,14 @@ class CdclSolver:
 
     def is_negative_literal(self, literal):
         '''Check if a literal is negative.'''
+        if not isinstance(literal, int):
+            return False  # Invalid literal
         return literal > self._num_vars
 
     def get_var_from_literal(self, literal):
         '''Get the variable corresponding to a literal.'''
+        if not isinstance(literal, int):
+            return 0  # Invalid literal
         return literal - self._num_vars if self.is_negative_literal(literal) else literal
 
     def decide(self):
@@ -413,7 +419,7 @@ class CdclSolver:
                 checked_clauses += 1
                 
                 try:
-                    if clause_id >= len(self._clauses):
+                    if clause_id < 0 or clause_id >= len(self._clauses):
                         continue
                         
                     clause = self._clauses[clause_id]
@@ -442,7 +448,7 @@ class CdclSolver:
                     # If clause is not satisfied and has unassigned variables
                     if not is_satisfied and unassigned_vars:
                         # Find unassigned variable with highest activity score
-                        return max(unassigned_vars, key=lambda v: self._berkmin_scores[v])
+                        return max(unassigned_vars, key=lambda v: self._berkmin_scores[v] if v < len(self._berkmin_scores) else 0)
                         
                 except (IndexError, KeyError):
                     continue
@@ -454,14 +460,19 @@ class CdclSolver:
                                       if v not in self._variable_to_assignment_nodes]
             if unassigned_conflict_vars:
                 # Return the one with highest activity
-                return max(unassigned_conflict_vars, key=lambda v: self._berkmin_scores[v])
+                try:
+                    return max(unassigned_conflict_vars, 
+                              key=lambda v: self._berkmin_scores[v] if 1 <= v < len(self._berkmin_scores) else 0)
+                except (ValueError, IndexError):
+                    # If there's an error, just return the first one
+                    return unassigned_conflict_vars[0] if unassigned_conflict_vars else -1
         
         # Finally, fall back to highest overall activity score
         max_score = -1.0
         max_var = -1
         
         # Find variable with highest score
-        for v in range(1, self._num_vars + 1):
+        for v in range(1, min(self._num_vars + 1, len(self._berkmin_scores))):
             if v not in self._variable_to_assignment_nodes and self._berkmin_scores[v] > max_score:
                 max_score = self._berkmin_scores[v]
                 max_var = v
@@ -482,7 +493,15 @@ class CdclSolver:
         # Find unsatisfied clauses and sort by size
         unsatisfied_clauses = []
         
+        # Ensure clause_sizes has the right length
+        if len(self._clause_sizes) != len(self._clauses):
+            # Rebuild clause_sizes if needed
+            self._clause_sizes = [len(clause) for clause in self._clauses]
+        
         for i in range(self._num_clauses):
+            if i >= len(self._clauses):
+                continue
+                
             clause = self._clauses[i]
             is_satisfied = False
             has_unassigned = False
@@ -490,6 +509,9 @@ class CdclSolver:
             for lit in clause:
                 var = self.get_var_from_literal(lit)
                 
+                if not (1 <= var <= self._num_vars):
+                    continue
+                    
                 if var in self._variable_to_assignment_nodes:
                     node = self._variable_to_assignment_nodes[var]
                     is_negative = self.is_negative_literal(lit)
@@ -502,7 +524,8 @@ class CdclSolver:
             
             if not is_satisfied and has_unassigned:
                 # Collect unsatisfied clauses with size
-                unsatisfied_clauses.append((i, self._clause_sizes[i]))
+                if i < len(self._clause_sizes):
+                    unsatisfied_clauses.append((i, self._clause_sizes[i]))
         
         # Sort by clause size (ascending)
         unsatisfied_clauses.sort(key=lambda x: x[1])
@@ -510,25 +533,28 @@ class CdclSolver:
         # If we have unsatisfied clauses, select a variable from the smallest one
         if unsatisfied_clauses:
             smallest_clause_id = unsatisfied_clauses[0][0]
-            clause = self._clauses[smallest_clause_id]
-            
-            # Find unassigned variables in this clause
-            unassigned_vars = []
-            for lit in clause:
-                var = self.get_var_from_literal(lit)
-                if var not in self._variable_to_assignment_nodes:
-                    unassigned_vars.append(var)
-            
-            if unassigned_vars:
-                # Choose the variable that appears in the most unsatisfied clauses
-                var_counts = {}
-                for var in unassigned_vars:
-                    var_counts[var] = 0
-                    for clause_id in self._var_to_clauses[var]:
-                        if clause_id in [c[0] for c in unsatisfied_clauses]:
-                            var_counts[var] += 1
+            if smallest_clause_id < len(self._clauses):
+                clause = self._clauses[smallest_clause_id]
                 
-                return max(var_counts, key=var_counts.get)
+                # Find unassigned variables in this clause
+                unassigned_vars = []
+                for lit in clause:
+                    var = self.get_var_from_literal(lit)
+                    if 1 <= var <= self._num_vars and var not in self._variable_to_assignment_nodes:
+                        unassigned_vars.append(var)
+                
+                if unassigned_vars:
+                    # Choose the variable that appears in the most unsatisfied clauses
+                    var_counts = {}
+                    for var in unassigned_vars:
+                        if var < len(self._var_to_clauses):
+                            var_counts[var] = 0
+                            for clause_id in self._var_to_clauses[var]:
+                                if clause_id in [c[0] for c in unsatisfied_clauses]:
+                                    var_counts[var] += 1
+                    
+                    if var_counts:
+                        return max(var_counts, key=var_counts.get)
         
         # Fallback to the first unassigned variable
         for x in range(1, self._num_vars + 1):
@@ -537,136 +563,33 @@ class CdclSolver:
                 
         return -1
 
-    def boolean_constraint_propogation(self, is_first_time):
-        '''
-        Main method that makes all implications.
-
-        Returns:
-            "CONFLICT", "NO_CONFLICT", or "RESTART"
-        '''
-        last_assignment_pointer = 0 if is_first_time else len(self._assignment_stack) - 1
-
-        while last_assignment_pointer < len(self._assignment_stack):
-            last_assigned_node = self._assignment_stack[last_assignment_pointer]
-            
-            # Skip nodes without a variable (conflict nodes)
-            if last_assigned_node.var is None:
-                last_assignment_pointer += 1
-                continue
-
-            literal_that_is_falsed = (
-                last_assigned_node.var + self._num_vars if last_assigned_node.value
-                else last_assigned_node.var
-            )
-
-            clauses_watched = self._clauses_watched_by_l.setdefault(literal_that_is_falsed, []).copy()
-
-            for clause_id in reversed(clauses_watched):
-                # Skip invalid clause ids
-                if clause_id >= len(self._clauses):
-                    continue
-                    
-                # For BerkMin, update satisfied status if this is a learned clause
-                if self._decider == "BERKMIN" and clause_id in self._learned_clauses:
-                    # Reset satisfied status when we're checking implications again
-                    self._berkmin_clause_satisfied[clause_id] = False
-                    
-                watch_list = self._literals_watching_c.get(clause_id, [])
-                
-                # Skip if watch list is invalid
-                if len(watch_list) < 2:
-                    continue
-                
-                other_watch_literal = watch_list[1] if watch_list[0] == literal_that_is_falsed else watch_list[0]
-                other_watch_var = self.get_var_from_literal(other_watch_literal)
-                
-                # Skip if variable is out of bounds
-                if other_watch_var > self._num_vars:
-                    continue
-                    
-                is_negative_other = self.is_negative_literal(other_watch_literal)
-
-                if other_watch_var in self._variable_to_assignment_nodes:
-                    value_assigned = self._variable_to_assignment_nodes[other_watch_var].value
-                    if (is_negative_other and not value_assigned) or (not is_negative_other and value_assigned):
-                        # For BerkMin, if this satisfies a learned clause, mark it
-                        if self._decider == "BERKMIN" and clause_id in self._learned_clauses:
-                            self._berkmin_clause_satisfied[clause_id] = True
-                        continue
-
-                clause = self._clauses[clause_id]
-                new_literal_to_watch = -1
-
-                for lit in clause:
-                    if lit not in watch_list:
-                        var_of_lit = self.get_var_from_literal(lit)
-                        
-                        # Skip if variable is out of bounds
-                        if var_of_lit > self._num_vars:
-                            continue
-
-                        if var_of_lit not in self._variable_to_assignment_nodes:
-                            new_literal_to_watch = lit
-                            break
-
-                        node = self._variable_to_assignment_nodes[var_of_lit]
-                        is_negative = self.is_negative_literal(lit)
-                        if (is_negative and not node.value) or (not is_negative and node.value):
-                            new_literal_to_watch = lit
-                            break
-
-                if new_literal_to_watch != -1:
-                    self._literals_watching_c[clause_id].remove(literal_that_is_falsed)
-                    self._literals_watching_c[clause_id].append(new_literal_to_watch)
-                    self._clauses_watched_by_l[literal_that_is_falsed].remove(clause_id)
-                    self._clauses_watched_by_l.setdefault(new_literal_to_watch, []).append(clause_id)
-                else:
-                    if other_watch_var not in self._variable_to_assignment_nodes:
-                        value_to_set = not is_negative_other
-                        assign_var_node = AssignedNode(other_watch_var, value_to_set, self._level, clause_id)
-                        self._variable_to_assignment_nodes[other_watch_var] = assign_var_node
-                        self._assignment_stack.append(assign_var_node)
-                        assign_var_node.index = len(self._assignment_stack) - 1
-
-                        if self._decider == "VSIDS":
-                            self._priority_queue.remove(other_watch_var)
-                            self._priority_queue.remove(other_watch_var + self._num_vars)
-                        elif self._decider == "MINISAT":
-                            self._priority_queue.remove(other_watch_var)
-                            self._phase[other_watch_var] = 0 if not value_to_set else 1
-                        elif self._decider == "BERKMIN":
-                            # Just update phase saving for BerkMin
-                            if 1 <= other_watch_var <= self._num_vars:
-                                self._berkmin_phase[other_watch_var] = value_to_set
-                    else:
-                        self._conflicts_before_restart += 1
-                        if self._conflicts_before_restart >= self._conflict_limit:
-                            self._conflicts_before_restart = 0
-
-                            if self._restarter == "GEOMETRIC":
-                                self._conflict_limit *= self._limit_mult
-                            else:
-                                self._conflict_limit = self._luby_base * get_next_luby_number()
-
-                            return "RESTART"
-
-                        conflict_node = AssignedNode(None, None, self._level, clause_id)
-                        self._assignment_stack.append(conflict_node)
-                        conflict_node.index = len(self._assignment_stack) - 1
-                        return "CONFLICT"
-
-            last_assignment_pointer += 1
-
-        return "NO_CONFLICT"
-
     def binary_resolute(self, clause1, clause2, var):
         '''Perform binary resolution of two clauses on a variable.'''
-        full_clause = list(OrderedDict.fromkeys(clause1 + clause2))
-
-        full_clause.remove(var)
-        full_clause.remove(var + self._num_vars)
-
-        return full_clause
+        try:
+            # Ensure var is within bounds
+            if var <= 0 or var > self._num_vars:
+                return clause1  # Just return the first clause if var is invalid
+                
+            # Create a combined clause without duplicates
+            full_clause = list(OrderedDict.fromkeys(clause1 + clause2))
+            
+            # Try to remove both forms of the variable
+            pos_var = var
+            neg_var = var + self._num_vars
+            
+            # Make sure both forms exist before removing them
+            if pos_var in full_clause and neg_var in full_clause:
+                full_clause.remove(pos_var)
+                full_clause.remove(neg_var)
+            else:
+                # If both forms don't exist, this is not a valid resolution
+                # Just return a conservative result
+                return clause1
+                
+            return full_clause
+        except (ValueError, IndexError):
+            # If there's an error, return a conservative result
+            return clause1
 
     def is_valid_clause(self, clause, level):
         '''
@@ -681,7 +604,7 @@ class CdclSolver:
             var = self.get_var_from_literal(lit)
             
             # Skip invalid variables
-            if var > self._num_vars or var not in self._variable_to_assignment_nodes:
+            if var <= 0 or var > self._num_vars or var not in self._variable_to_assignment_nodes:
                 continue
                 
             node = self._variable_to_assignment_nodes[var]
@@ -700,20 +623,42 @@ class CdclSolver:
         '''
         max_level_before_conflict = -1
         literal_at_conflict_level = -1
+        conflict_level_literals = []
 
+        # First pass: collect all literals at conflict level
         for lit in conflict_clause:
             var = self.get_var_from_literal(lit)
             
             # Skip invalid variables
-            if var > self._num_vars or var not in self._variable_to_assignment_nodes:
+            if var <= 0 or var > self._num_vars or var not in self._variable_to_assignment_nodes:
                 continue
                 
             node = self._variable_to_assignment_nodes[var]
 
             if node.level == conflict_level:
-                literal_at_conflict_level = lit
+                conflict_level_literals.append((lit, node.index))
             elif node.level > max_level_before_conflict:
                 max_level_before_conflict = node.level
+
+        # Choose the literal with the highest index (most recently assigned)
+        if conflict_level_literals:
+            conflict_level_literals.sort(key=lambda x: x[1], reverse=True)
+            literal_at_conflict_level = conflict_level_literals[0][0]
+        else:
+            # If we didn't find a literal at the conflict level, handle gracefully
+            if conflict_clause:
+                # Try to find any valid literal
+                for lit in conflict_clause:
+                    var = self.get_var_from_literal(lit)
+                    if 1 <= var <= self._num_vars:
+                        literal_at_conflict_level = lit
+                        break
+                
+                # If still not found, use the first one
+                if literal_at_conflict_level == -1:
+                    literal_at_conflict_level = conflict_clause[0]
+            else:
+                raise ValueError("Empty conflict clause")
 
         return max_level_before_conflict, literal_at_conflict_level
 
@@ -725,15 +670,18 @@ class CdclSolver:
             Tuple (backtrack_level, node_to_add)
         '''
         # Get conflict information
+        if not self._assignment_stack:
+            return 0, None
+            
         conflict_node = self._assignment_stack[-1]
         conflict_level = conflict_node.level
         
         # Validate conflict node has a valid clause reference
-        if conflict_node.clause is None or conflict_node.clause >= len(self._clauses):
+        if conflict_node.clause is None or conflict_node.clause < 0 or conflict_node.clause >= len(self._clauses):
             # Return a conservative backtrack to level 0 
             return 0, None
             
-        conflict_clause = self._clauses[conflict_node.clause]
+        conflict_clause = self._clauses[conflict_node.clause].copy()  # Make a copy to avoid modifying original
         self._assignment_stack.pop()
         
         # Level 0 conflict means UNSAT
@@ -752,16 +700,22 @@ class CdclSolver:
                     break
                     
                 # Resolve with the implication clause
-                if prev_assigned_node is None or prev_assigned_node.clause is None:
+                if prev_assigned_node is None or prev_assigned_node.clause is None or prev_assigned_node.clause < 0 or prev_assigned_node.clause >= len(self._clauses):
                     # This can happen with decision variables that don't have an implication clause
                     break
                     
-                clause = self._clauses[prev_assigned_node.clause]
+                clause = self._clauses[prev_assigned_node.clause].copy()  # Make a copy
                 var = prev_assigned_node.var
-                conflict_clause = self.binary_resolute(conflict_clause, clause, var)
+                
+                # Only resolve if the variable appears in both clauses
+                if var in conflict_clause or var + self._num_vars in conflict_clause:
+                    conflict_clause = self.binary_resolute(conflict_clause, clause, var)
+                else:
+                    # If resolution not possible, just break
+                    break
             
             # Add the learned clause to the database
-            if len(conflict_clause) > 1:
+            if len(conflict_clause) > 0:
                 clause_id = self._num_clauses
                 self._num_clauses += 1
                 self._clauses.append(conflict_clause)
@@ -771,7 +725,7 @@ class CdclSolver:
                     self._clause_sizes.append(len(conflict_clause))
                     for lit in conflict_clause:
                         var = self.get_var_from_literal(lit)
-                        if var <= self._num_vars and clause_id not in self._var_to_clauses[var]:
+                        if 1 <= var <= self._num_vars and clause_id not in self._var_to_clauses[var]:
                             self._var_to_clauses[var].append(clause_id)
                 
                 # For BerkMin heuristic
@@ -802,7 +756,7 @@ class CdclSolver:
                     
                     # Decay scores periodically to prevent overflow and focus on recent conflicts
                     if len(self._learned_clauses) % 50 == 0:
-                        for i in range(1, self._num_vars + 1):
+                        for i in range(1, min(self._num_vars + 1, len(self._berkmin_scores))):
                             self._berkmin_scores[i] *= 0.93  # Slightly faster decay for better differentiation
                 
                 # For Jeroslow-Wang heuristic
@@ -811,7 +765,7 @@ class CdclSolver:
                     weight = 2.0 ** (-len(conflict_clause))
                     for lit in conflict_clause:
                         var = self.get_var_from_literal(lit)
-                        if var <= self._num_vars:  # Ensure we're within bounds
+                        if 1 <= var <= self._num_vars:  # Ensure we're within bounds
                             if self.is_negative_literal(lit):
                                 self._neg_scores[var] += weight
                             else:
@@ -821,21 +775,25 @@ class CdclSolver:
                 
                 # Set up watched literals for the new clause
                 if len(conflict_clause) >= 2:
-                    self._literals_watching_c[clause_id] = [conflict_clause[0], conflict_clause[1]]
-                    self._clauses_watched_by_l.setdefault(conflict_clause[0], []).append(clause_id)
-                    self._clauses_watched_by_l.setdefault(conflict_clause[1], []).append(clause_id)
+                    try:
+                        self._literals_watching_c[clause_id] = [conflict_clause[0], conflict_clause[1]]
+                        self._clauses_watched_by_l.setdefault(conflict_clause[0], []).append(clause_id)
+                        self._clauses_watched_by_l.setdefault(conflict_clause[1], []).append(clause_id)
+                    except IndexError:
+                        # Handle the case where conflict_clause might not have enough elements
+                        pass
                 
                 # Update variable scores based on decision strategy
                 if self._decider == "VSIDS":
                     for l in conflict_clause:
-                        if l < len(self._lit_scores):
+                        if 0 <= l < len(self._lit_scores):
                             self._lit_scores[l] += self._incr
                             self._priority_queue.increase_update(l, self._incr)
                     self._incr += 0.75
                 elif self._decider == "MINISAT":
                     for l in conflict_clause:
                         var = self.get_var_from_literal(l)
-                        if var <= self._num_vars:
+                        if 1 <= var <= self._num_vars:
                             self._var_scores[var] += self._incr
                             self._priority_queue.increase_update(var, self._incr)
                     self._incr /= self._decay
@@ -846,32 +804,40 @@ class CdclSolver:
                     conflict_level_var = self.get_var_from_literal(conflict_level_literal)
                     
                     # Ensure the variable is in bounds
-                    if conflict_level_var > self._num_vars:
+                    if conflict_level_var <= 0 or conflict_level_var > self._num_vars:
                         return 0, None
                         
                     value_to_set = not self.is_negative_literal(conflict_level_literal)
                     
+                    # Don't backtrack further than necessary
+                    if backtrack_level < 0:
+                        backtrack_level = 0
+                        
                     return backtrack_level, AssignedNode(conflict_level_var, value_to_set, backtrack_level, clause_id)
                 except (IndexError, TypeError, ValueError):
                     # If there's any error, backtrack to level 0
                     return 0, None
             else:
-                # Single-literal conflict clause
+                # Empty conflict clause - this is an error condition
                 if not conflict_clause:
                     return 0, None
                     
-                literal = conflict_clause[0]
-                var = self.get_var_from_literal(literal)
-                
-                # Ensure variable is in bounds
-                if var > self._num_vars:
-                    return 0, None
+                # Single-literal conflict clause
+                if len(conflict_clause) == 1:
+                    literal = conflict_clause[0]
+                    var = self.get_var_from_literal(literal)
                     
-                value_to_set = not self.is_negative_literal(literal)
+                    # Ensure variable is in bounds
+                    if var <= 0 or var > self._num_vars:
+                        return 0, None
+                        
+                    value_to_set = not self.is_negative_literal(literal)
+                    
+                    return 0, AssignedNode(var, value_to_set, 0, None)
+                else:
+                    return 0, None
                 
-                return 0, AssignedNode(var, value_to_set, 0, None)
-                
-        except Exception:
+        except Exception as e:
             # Catch any other exceptions and backtrack to level 0
             return 0, None
 
@@ -925,3 +891,149 @@ class CdclSolver:
                 self._priority_queue.remove(node_to_add.var)
                 self._phase[node_to_add.var] = 0 if not node_to_add.value else 1
             # No priority queue for BerkMin anymore
+
+    def boolean_constraint_propogation(self, is_first_time):
+        '''
+        Main method that makes all implications.
+
+        Returns:
+            "CONFLICT", "NO_CONFLICT", or "RESTART"
+        '''
+        last_assignment_pointer = 0 if is_first_time else len(self._assignment_stack) - 1
+
+        while last_assignment_pointer < len(self._assignment_stack):
+            # Ensure we have a valid index
+            if last_assignment_pointer < 0 or last_assignment_pointer >= len(self._assignment_stack):
+                break
+                
+            last_assigned_node = self._assignment_stack[last_assignment_pointer]
+            
+            # Skip nodes without a variable (conflict nodes)
+            if last_assigned_node.var is None:
+                last_assignment_pointer += 1
+                continue
+
+            literal_that_is_falsed = (
+                last_assigned_node.var + self._num_vars if last_assigned_node.value
+                else last_assigned_node.var
+            )
+
+            clauses_watched = self._clauses_watched_by_l.setdefault(literal_that_is_falsed, []).copy()
+
+            for clause_id in reversed(clauses_watched):
+                # Skip invalid clause ids
+                if clause_id < 0 or clause_id >= len(self._clauses):
+                    continue
+                    
+                # For BerkMin, update satisfied status if this is a learned clause
+                if self._decider == "BERKMIN" and clause_id in self._learned_clauses:
+                    # Reset satisfied status when we're checking implications again
+                    self._berkmin_clause_satisfied[clause_id] = False
+                    
+                watch_list = self._literals_watching_c.get(clause_id, [])
+                
+                # Skip if watch list is invalid
+                if len(watch_list) < 2:
+                    continue
+                
+                # Ensure the watch literals are valid
+                if watch_list[0] == literal_that_is_falsed and len(watch_list) > 1:
+                    other_watch_literal = watch_list[1]
+                elif watch_list[1] == literal_that_is_falsed and len(watch_list) > 0:
+                    other_watch_literal = watch_list[0]
+                else:
+                    continue
+                    
+                other_watch_var = self.get_var_from_literal(other_watch_literal)
+                
+                # Skip if variable is out of bounds
+                if other_watch_var <= 0 or other_watch_var > self._num_vars:
+                    continue
+                    
+                is_negative_other = self.is_negative_literal(other_watch_literal)
+
+                if other_watch_var in self._variable_to_assignment_nodes:
+                    value_assigned = self._variable_to_assignment_nodes[other_watch_var].value
+                    if (is_negative_other and not value_assigned) or (not is_negative_other and value_assigned):
+                        # For BerkMin, if this satisfies a learned clause, mark it
+                        if self._decider == "BERKMIN" and clause_id in self._learned_clauses:
+                            self._berkmin_clause_satisfied[clause_id] = True
+                        continue
+
+                clause = self._clauses[clause_id]
+                new_literal_to_watch = -1
+
+                for lit in clause:
+                    if lit not in watch_list:
+                        var_of_lit = self.get_var_from_literal(lit)
+                        
+                        # Skip if variable is out of bounds
+                        if var_of_lit <= 0 or var_of_lit > self._num_vars:
+                            continue
+
+                        if var_of_lit not in self._variable_to_assignment_nodes:
+                            new_literal_to_watch = lit
+                            break
+
+                        node = self._variable_to_assignment_nodes[var_of_lit]
+                        is_negative = self.is_negative_literal(lit)
+                        if (is_negative and not node.value) or (not is_negative and node.value):
+                            new_literal_to_watch = lit
+                            break
+
+                if new_literal_to_watch != -1:
+                    try:
+                        self._literals_watching_c[clause_id].remove(literal_that_is_falsed)
+                        self._literals_watching_c[clause_id].append(new_literal_to_watch)
+                        self._clauses_watched_by_l[literal_that_is_falsed].remove(clause_id)
+                        self._clauses_watched_by_l.setdefault(new_literal_to_watch, []).append(clause_id)
+                    except (ValueError, KeyError, IndexError):
+                        # Handle errors gracefully if the literals or clauses don't exist
+                        continue
+                else:
+                    if other_watch_var not in self._variable_to_assignment_nodes:
+                        value_to_set = not is_negative_other
+                        assign_var_node = AssignedNode(other_watch_var, value_to_set, self._level, clause_id)
+                        self._variable_to_assignment_nodes[other_watch_var] = assign_var_node
+                        self._assignment_stack.append(assign_var_node)
+                        assign_var_node.index = len(self._assignment_stack) - 1
+
+                        if self._decider == "VSIDS":
+                            try:
+                                self._priority_queue.remove(other_watch_var)
+                                self._priority_queue.remove(other_watch_var + self._num_vars)
+                            except (ValueError, KeyError, IndexError):
+                                pass  # Handle errors gracefully
+                        elif self._decider == "MINISAT":
+                            try:
+                                self._priority_queue.remove(other_watch_var)
+                                self._phase[other_watch_var] = 0 if not value_to_set else 1
+                            except (ValueError, KeyError, IndexError):
+                                pass  # Handle errors gracefully
+                        elif self._decider == "BERKMIN":
+                            # Just update phase saving for BerkMin
+                            if 1 <= other_watch_var <= self._num_vars:
+                                self._berkmin_phase[other_watch_var] = value_to_set
+                    else:
+                        # Check if the other watch variable's value actually causes a conflict
+                        value_assigned = self._variable_to_assignment_nodes[other_watch_var].value
+                        if (is_negative_other and value_assigned) or (not is_negative_other and not value_assigned):
+                            self._conflicts_before_restart += 1
+                            if self._conflicts_before_restart >= self._conflict_limit:
+                                self._conflicts_before_restart = 0
+
+                                if self._restarter == "GEOMETRIC":
+                                    self._conflict_limit *= self._limit_mult
+                                else:
+                                    self._conflict_limit = self._luby_base * get_next_luby_number()
+
+                                return "RESTART"
+
+                            conflict_node = AssignedNode(None, None, self._level, clause_id)
+                            self._assignment_stack.append(conflict_node)
+                            conflict_node.index = len(self._assignment_stack) - 1
+                            return "CONFLICT"
+
+            last_assignment_pointer += 1
+
+        return "NO_CONFLICT"
